@@ -20,6 +20,7 @@ result
 
 # Local tooling
 .codex
+.claude
 
 # JVM crash artifacts
 hs_err_pid*
