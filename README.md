@@ -31,6 +31,7 @@ Implemented rules:
 - `LowercasePatternMatchChecker`
 - `IllegalImportsChecker`
 - `MethodLengthChecker`
+- `CyclomaticComplexityChecker`
 
 Each implemented rule has:
 
@@ -136,6 +137,21 @@ rules = [
 MethodLengthChecker.maxLength = 50
 MethodLengthChecker.ignoreComments = false
 MethodLengthChecker.ignoreEmpty = false
+```
+
+### CyclomaticComplexityChecker
+
+Flags methods whose cyclomatic complexity exceeds a configured maximum.
+
+`.scalafix.conf`:
+
+```hocon
+rules = [
+  CyclomaticComplexityChecker
+]
+
+CyclomaticComplexityChecker.maximum = 13
+CyclomaticComplexityChecker.countCases = true
 ```
 
 ## Repository Layout
