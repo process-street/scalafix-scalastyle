@@ -8,7 +8,7 @@ Provide a pragmatic migration path from scalastyle to scalafix/scalafmt for Scal
 
 ## Rule Categorization
 
-### Replaced by scalafmt - 20 rules
+### Replaced by scalafmt - 21 rules
 
 These are formatting/whitespace concerns that are intentionally delegated to scalafmt as the migration target. This is a compatibility mapping, not a claim of byte-for-byte equivalence with scalastyle.
 
@@ -34,6 +34,7 @@ These are formatting/whitespace concerns that are intentionally delegated to sca
 | ImportOrderChecker | `rewrite.rules = [SortImports]` |
 | ImportGroupingChecker | scalafmt import grouping |
 | ProcedureDeclarationChecker | `rewrite.rules = [ProcedureSyntax]` |
+| UppercaseLChecker | `literals.long = Upper` |
 
 ### Replaced by built-in scalafix rules - 9 rules
 
@@ -51,7 +52,7 @@ These are intentionally mapped to scalafix built-in rules instead of being reimp
 | RegexChecker | `regex` (custom patterns) |
 | TokenChecker | `regex` (custom patterns) |
 
-### Included (to implement) - 43 rules
+### Included (to implement) - 42 rules
 
 All syntactic lint rules. Grouped by category:
 
@@ -79,42 +80,41 @@ All syntactic lint rules. Grouped by category:
 17. `CovariantEqualsChecker` - covariant equals
 18. `NoCloneChecker` - no clone()
 19. `StructuralTypeChecker` - no structural types
-20. `UppercaseLChecker` - uppercase L for long literals
-21. `SimplifyBooleanExpressionChecker` - simplify booleans
-22. `RedundantIfChecker` - redundant if/else true/false
-23. `PublicMethodsHaveTypeChecker` - explicit return types, params: `ignoreOverride`
-24. `EmptyClassChecker` - empty class bodies
+20. `SimplifyBooleanExpressionChecker` - simplify booleans
+21. `RedundantIfChecker` - redundant if/else true/false
+22. `PublicMethodsHaveTypeChecker` - explicit return types, params: `ignoreOverride`
+23. `EmptyClassChecker` - empty class bodies
 
 **Java annotation checks (2):**
-25. `DeprecatedJavaChecker` - Java @Deprecated
-26. `OverrideJavaChecker` - Java @Override
+24. `DeprecatedJavaChecker` - Java @Deprecated
+25. `OverrideJavaChecker` - Java @Override
 
 **Import checks (3):**
-27. `IllegalImportsChecker` - forbidden imports, params: `illegalImports`
-28. `UnderscoreImportChecker` - wildcard imports, params: `ignoreRegex`
-29. `BlockImportChecker` - block imports
+26. `IllegalImportsChecker` - forbidden imports, params: `illegalImports`
+27. `UnderscoreImportChecker` - wildcard imports, params: `ignoreRegex`
+28. `BlockImportChecker` - block imports
 
 **Brace enforcement (4):**
-30. `IfBraceChecker` - if braces, params: `singleLineAllowed`, `doubleLineAllowed`
-31. `ForBraceChecker` - for braces, params: `singleLineAllowed`
-32. `WhileBraceChecker` - while braces
-33. `CaseBraceChecker` - disallow case braces
+29. `IfBraceChecker` - if braces, params: `singleLineAllowed`, `doubleLineAllowed`
+30. `ForBraceChecker` - for braces, params: `singleLineAllowed`
+31. `WhileBraceChecker` - while braces
+32. `CaseBraceChecker` - disallow case braces
 
 **File-level checks (2):**
-34. `HeaderMatchesChecker` - file header, params: `header`, `regex`
-35. `TodoCommentChecker` - TODO/FIXME comments, params: `words`
+33. `HeaderMatchesChecker` - file header, params: `header`, `regex`
+34. `TodoCommentChecker` - TODO/FIXME comments, params: `words`
 
 **String/literal checks (3):**
-36. `MultipleStringLiteralsChecker` - repeated strings, params: `allowed`, `ignoreRegex`
-37. `EmptyInterpolatedStringChecker` - empty string interpolation
-38. `NonASCIICharacterChecker` - non-ASCII chars, params: `allowStringLiterals`
+35. `MultipleStringLiteralsChecker` - repeated strings, params: `allowed`, `ignoreRegex`
+36. `EmptyInterpolatedStringChecker` - empty string interpolation
+37. `NonASCIICharacterChecker` - non-ASCII chars, params: `allowStringLiterals`
 
 **Miscellaneous (5):**
-39. `LowercasePatternMatchChecker` - lowercase pattern match
-40. `NotImplementedErrorUsage` - forbid `???` operators
-41. `ForLoopChecker` - for loop (yield) check
-42. `ScalaDocChecker` - ScalaDoc validation, params: `ignoreRegex`, `ignoreTokenTypes`, `ignoreOverride`, `indentStyle`
-43. `NamedArgumentChecker` - named arguments, params: `checkString`, `ignoreMethod`
+38. `LowercasePatternMatchChecker` - lowercase pattern match
+39. `NotImplementedErrorUsage` - forbid `???` operators
+40. `ForLoopChecker` - for loop (yield) check
+41. `ScalaDocChecker` - ScalaDoc validation, params: `ignoreRegex`, `ignoreTokenTypes`, `ignoreOverride`, `indentStyle`
+42. `NamedArgumentChecker` - named arguments, params: `checkString`, `ignoreMethod`
 
 ---
 
@@ -204,7 +204,7 @@ For each rule:
 6. Run `sbt tests/test` until the migrated test set passes for that rule in both Scala 2 and Scala 3 modes where applicable
 
 **Batch order:**
-1. Simple token/literal checks (UppercaseL, EmptyInterpolatedString, NotImplementedErrorUsage) - warmup
+1. Simple token/literal checks (EmptyInterpolatedString, NotImplementedErrorUsage) - warmup
 2. Naming convention checkers (8 rules) - similar structure, parameterized regex
 3. Size/complexity limits (7 rules) - tree traversal + counting
 4. Code smell / best practice (9 rules) - the bulk

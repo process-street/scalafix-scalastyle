@@ -2,17 +2,31 @@ package fix
 
 import org.scalatest.funsuite.AnyFunSuiteLike
 import scalafix.testkit.AbstractSyntacticRuleSuite
-import scalafix.v1._
 
 class RuleSuite extends AbstractSyntacticRuleSuite with AnyFunSuiteLike {
   check(
-    new NoOpRule,
-    "NoOpRule",
-    "object RuleSuiteSmokeTest",
-    "object RuleSuiteSmokeTest"
+    new NotImplementedErrorUsage,
+    "NotImplementedErrorUsage noErrors",
+    """class X {
+      |  val x = 0
+      |}
+      |""".stripMargin,
+    """class X {
+      |  val x = 0
+      |}
+      |""".stripMargin
   )
-}
 
-class NoOpRule extends SyntacticRule("NoOpRule") {
-  override def fix(implicit doc: SyntacticDocument): Patch = Patch.empty
+  check(
+    new NotImplementedErrorUsage,
+    "NotImplementedErrorUsage notImplementedErrorFound",
+    """class X {
+      |  val x = ???
+      |}
+      |""".stripMargin,
+    """class X {
+      |  val x = ???/* scalafix:ok */
+      |}
+      |""".stripMargin
+  )
 }
