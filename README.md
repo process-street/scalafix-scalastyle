@@ -36,6 +36,90 @@ Each implemented rule has:
 - one rule-specific test suite under `tests/src/test/scala/fix/`
 - registration in `rules/src/main/resources/META-INF/services/scalafix.v1.Rule`
 
+Current limitation:
+
+- some implemented rules currently cover only the subset of upstream scalastyle behavior that was needed immediately for migration
+- for example, `IllegalImportsChecker` currently implements forbidden-import matching but not the full upstream `exemptImports` feature set
+- these are deliberate partial implementations, not claims of full parity
+- missing pieces can be added later, but they should be treated as known gaps until explicitly implemented and tested
+
+## Implemented Rules
+
+### NotImplementedErrorUsage
+
+Flags `???` placeholders.
+
+`.scalafix.conf`:
+
+```hocon
+rules = [
+  NotImplementedErrorUsage
+]
+```
+
+### EmptyInterpolatedStringChecker
+
+Flags `s` and `f` interpolated strings that do not actually interpolate any variables.
+
+Examples that are flagged:
+
+- `s"foo"`
+- `s""`
+- `f"value"`
+
+Examples that are not flagged:
+
+- `"foo"`
+- `s"$foo bar"`
+- `raw"foo"`
+
+`.scalafix.conf`:
+
+```hocon
+rules = [
+  EmptyInterpolatedStringChecker
+]
+```
+
+### LowercasePatternMatchChecker
+
+Flags simple lowercase pattern matches such as `case lc => ...`, where the intent is often a stable identifier match that should have been written with backticks.
+
+Examples that are allowed:
+
+- ``case `lc` => ...``
+- `case s: Int => ...`
+- `case List(x, y) => ...`
+
+`.scalafix.conf`:
+
+```hocon
+rules = [
+  LowercasePatternMatchChecker
+]
+```
+
+### IllegalImportsChecker
+
+Flags imports that match configured forbidden import prefixes.
+
+`.scalafix.conf`:
+
+```hocon
+rules = [
+  IllegalImportsChecker
+]
+
+IllegalImportsChecker.illegalImports = [
+  "sun._",
+  "java.awt._"
+]
+```
+
+Current limitation:
+
+- `exemptImports` is not implemented yet
+
 ## Repository Layout
 
 ```text
@@ -129,6 +213,8 @@ The current workflow is:
 4. Register it in `rules/src/main/resources/META-INF/services/scalafix.v1.Rule`.
 5. Port the upstream tests into a dedicated suite file in `tests/src/test/scala/fix/<RuleName>Suite.scala`.
 6. Run `sbt tests/test` until the ported cases pass across the matrix.
+
+When a rule is intentionally implemented as a partial subset, that should be documented in this README and kept visible in the tests rather than implied away.
 
 Current convention:
 
