@@ -8,7 +8,7 @@ Provide a pragmatic migration path from scalastyle to scalafix/scalafmt for Scal
 
 ## Rule Categorization
 
-### Replaced by scalafmt - 21 rules
+### Replaced by scalafmt - 22 rules
 
 These are formatting/whitespace concerns that are intentionally delegated to scalafmt as the migration target. This is a compatibility mapping, not a claim of byte-for-byte equivalence with scalastyle.
 
@@ -35,6 +35,7 @@ These are formatting/whitespace concerns that are intentionally delegated to sca
 | ImportGroupingChecker | scalafmt import grouping |
 | ProcedureDeclarationChecker | `rewrite.rules = [ProcedureSyntax]` |
 | UppercaseLChecker | `literals.long = Upper` |
+| IfBraceChecker | delegated to scalafmt brace/rewriting behavior for this project |
 
 ### Replaced by built-in scalafix rules - 9 rules
 
@@ -52,7 +53,7 @@ These are intentionally mapped to scalafix built-in rules instead of being reimp
 | RegexChecker | `regex` (custom patterns) |
 | TokenChecker | `regex` (custom patterns) |
 
-### Included (to implement) - 42 rules
+### Included (to implement) - 41 rules
 
 All syntactic lint rules. Grouped by category:
 
@@ -94,27 +95,26 @@ All syntactic lint rules. Grouped by category:
 27. `UnderscoreImportChecker` - wildcard imports, params: `ignoreRegex`
 28. `BlockImportChecker` - block imports
 
-**Brace enforcement (4):**
-29. `IfBraceChecker` - if braces, params: `singleLineAllowed`, `doubleLineAllowed`
-30. `ForBraceChecker` - for braces, params: `singleLineAllowed`
-31. `WhileBraceChecker` - while braces
-32. `CaseBraceChecker` - disallow case braces
+**Brace enforcement (3):**
+29. `ForBraceChecker` - for braces, params: `singleLineAllowed`
+30. `WhileBraceChecker` - while braces
+31. `CaseBraceChecker` - disallow case braces
 
 **File-level checks (2):**
-33. `HeaderMatchesChecker` - file header, params: `header`, `regex`
-34. `TodoCommentChecker` - TODO/FIXME comments, params: `words`
+32. `HeaderMatchesChecker` - file header, params: `header`, `regex`
+33. `TodoCommentChecker` - TODO/FIXME comments, params: `words`
 
 **String/literal checks (3):**
-35. `MultipleStringLiteralsChecker` - repeated strings, params: `allowed`, `ignoreRegex`
-36. `EmptyInterpolatedStringChecker` - empty string interpolation
-37. `NonASCIICharacterChecker` - non-ASCII chars, params: `allowStringLiterals`
+34. `MultipleStringLiteralsChecker` - repeated strings, params: `allowed`, `ignoreRegex`
+35. `EmptyInterpolatedStringChecker` - empty string interpolation
+36. `NonASCIICharacterChecker` - non-ASCII chars, params: `allowStringLiterals`
 
 **Miscellaneous (5):**
-38. `LowercasePatternMatchChecker` - lowercase pattern match
-39. `NotImplementedErrorUsage` - forbid `???` operators
-40. `ForLoopChecker` - for loop (yield) check
-41. `ScalaDocChecker` - ScalaDoc validation, params: `ignoreRegex`, `ignoreTokenTypes`, `ignoreOverride`, `indentStyle`
-42. `NamedArgumentChecker` - named arguments, params: `checkString`, `ignoreMethod`
+37. `LowercasePatternMatchChecker` - lowercase pattern match
+38. `NotImplementedErrorUsage` - forbid `???` operators
+39. `ForLoopChecker` - for loop (yield) check
+40. `ScalaDocChecker` - ScalaDoc validation, params: `ignoreRegex`, `ignoreTokenTypes`, `ignoreOverride`, `indentStyle`
+41. `NamedArgumentChecker` - named arguments, params: `checkString`, `ignoreMethod`
 
 ---
 
