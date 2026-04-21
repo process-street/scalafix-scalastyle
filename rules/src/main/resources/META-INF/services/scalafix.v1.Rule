@@ -10,3 +10,5 @@ fix.NoCloneChecker
 fix.SimplifyBooleanExpressionChecker
 fix.ClassNamesChecker
 fix.ObjectNamesChecker
+fix.PackageObjectNamesChecker
+fix.MethodNamesChecker

@@ -38,6 +38,8 @@ Implemented rules:
 - `SimplifyBooleanExpressionChecker`
 - `ClassNamesChecker`
 - `ObjectNamesChecker`
+- `PackageObjectNamesChecker`
+- `MethodNamesChecker`
 
 Each implemented rule has:
 
@@ -214,6 +216,32 @@ rules = [
 ]
 
 ObjectNamesChecker.regex = "^[A-Z][A-Za-z]*$"
+```
+
+### PackageObjectNamesChecker
+
+Flags package object names that do not match a configured regex.
+
+```hocon
+rules = [
+  PackageObjectNamesChecker
+]
+
+PackageObjectNamesChecker.regex = "^[a-z][A-Za-z]*$"
+```
+
+### MethodNamesChecker
+
+Flags method names that do not match a configured regex.
+
+```hocon
+rules = [
+  MethodNamesChecker
+]
+
+MethodNamesChecker.regex = "^[a-z][A-Za-z0-9]*(_=)?$"
+MethodNamesChecker.ignoreRegex = "^$"
+MethodNamesChecker.ignoreOverride = false
 ```
 
 ## Repository Layout
