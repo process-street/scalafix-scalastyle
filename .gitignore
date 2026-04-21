@@ -1,0 +1,26 @@
+# sbt
+target/
+project/target/
+project/project/
+
+# metals / bloop
+.metals/
+.bloop/
+.bsp/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Nix
+result
+
+# Local tooling
+.codex
+
+# JVM crash artifacts
+hs_err_pid*
+core*
