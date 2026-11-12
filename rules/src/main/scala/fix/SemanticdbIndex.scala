@@ -12,19 +12,27 @@ import scala.util.Try
 
 import scalafix.v1.Configuration
 
-/** A parameter as the rule needs it: its name, and whether an argument can be
-  * passed to it by name in an ordinary argument list.
+/** A parameter as the rule needs it: its name, whether an argument can be
+  * passed to it by name in an ordinary argument list, and the symbol of its
+  * declared type, when that type is a plain reference.
   */
-final case class Parameter(name: String, isImplicit: Boolean, isRepeated: Boolean)
+final case class Parameter(
+    name: String,
+    isImplicit: Boolean,
+    isRepeated: Boolean,
+    typeSymbol: Option[String]
+)
 
-/** Parameter lists of the methods and constructors defined in the project
-  * being fixed, read from the SemanticDB files its compiler wrote.
+/** Parameter lists and parents of the types, methods and constructors defined
+  * in the project being fixed, read from the SemanticDB files its compiler
+  * wrote.
   *
   * Scalafix looks a symbol up in the classfiles on the classpath. That works
   * for Scala 2, whose classfiles carry Scala signatures, but a Scala 3
   * classfile carries only TASTy, so on Scala 3 a symbol defined in any other
   * file has no information. This index fills that gap from the SemanticDB
-  * files themselves.
+  * files themselves. It covers only the project's own code: a library
+  * compiled by Scala 3 ships no SemanticDB.
   *
   * It is built once, on the first lookup that needs it.
   */
@@ -37,8 +45,15 @@ final class SemanticdbIndex(roots: => List[Path]) {
   def constructors(cls: String): List[List[List[Parameter]]] =
     index.constructors.getOrElse(cls, Nil).flatMap(method)
 
-  def applies(obj: String): List[List[List[Parameter]]] =
-    index.applies.getOrElse(obj, Nil).flatMap(method)
+  /** The `apply` methods that a class, trait or object declares itself. */
+  def applies(owner: String): List[List[List[Parameter]]] =
+    index.applies.getOrElse(owner, Nil).flatMap(method)
+
+  /** The parents of a class, trait or object, or `None` if it is not one the
+    * index has seen.
+    */
+  def parents(symbol: String): Option[List[String]] =
+    index.parents.get(symbol)
 }
 
 object SemanticdbIndex {
@@ -47,7 +62,8 @@ object SemanticdbIndex {
   private final case class Entries(
       methods: Map[String, List[List[Parameter]]],
       constructors: Map[String, List[String]],
-      applies: Map[String, List[String]]
+      applies: Map[String, List[String]],
+      parents: Map[String, List[String]]
   )
 
   /** The SemanticDB roots of the build being fixed.
@@ -90,23 +106,39 @@ object SemanticdbIndex {
     val methods = mutable.Map.empty[String, List[List[Parameter]]]
     val constructors = mutable.Map.empty[String, List[String]]
     val applies = mutable.Map.empty[String, List[String]]
+    val parents = mutable.Map.empty[String, List[String]]
+
+    def addMethod(info: s.SymbolInformation, infos: Map[String, s.SymbolInformation]): Unit =
+      info.signature match {
+        case signature: s.MethodSignature =>
+          methods(info.symbol) = signature.parameterLists.toList.map(parameters(_, infos))
+          val owner = info.symbol.owner
+          if (info.kind.isConstructor)
+            constructors(owner) = info.symbol :: constructors.getOrElse(owner, Nil)
+          else if (info.displayName == "apply")
+            applies(owner) = info.symbol :: applies.getOrElse(owner, Nil)
+        case _ =>
+      }
+
+    def addType(info: s.SymbolInformation): Unit =
+      info.signature match {
+        case signature: s.ClassSignature =>
+          // A parent that is not a plain reference becomes "", which no
+          // lookup can find, so the rule treats it as unknown.
+          parents(info.symbol) = signature.parents.toList.map {
+            case s.TypeRef(_, symbol, _) => symbol
+            case _ => ""
+          }
+        case _ =>
+      }
 
     def add(document: s.TextDocument): Unit = {
       val infos = document.symbols.iterator.map(info => info.symbol -> info).toMap
       document.symbols.foreach { info =>
-        val isMethod = info.kind.isMethod || info.kind.isConstructor
-        if (isMethod && info.symbol.isGlobal && !info.language.isJava) {
-          info.signature match {
-            case signature: s.MethodSignature =>
-              methods(info.symbol) = signature.parameterLists.toList.map(parameters(_, infos))
-              val owner = info.symbol.owner
-              if (info.kind.isConstructor) {
-                constructors(owner) = info.symbol :: constructors.getOrElse(owner, Nil)
-              } else if (info.displayName == "apply" && owner.isTerm) {
-                applies(owner) = info.symbol :: applies.getOrElse(owner, Nil)
-              }
-            case _ =>
-          }
+        if (info.symbol.isGlobal && !info.language.isJava) {
+          val kind = info.kind
+          if (kind.isMethod || kind.isConstructor) addMethod(info, infos)
+          else if (kind.isClass || kind.isObject || kind.isTrait || kind.isPackageObject) addType(info)
         }
       }
     }
@@ -123,7 +155,7 @@ object SemanticdbIndex {
       } finally files.close()
     }
 
-    Entries(methods.toMap, constructors.toMap, applies.toMap)
+    Entries(methods.toMap, constructors.toMap, applies.toMap, parents.toMap)
   }
 
   private def parameters(
@@ -131,15 +163,25 @@ object SemanticdbIndex {
       infos: Map[String, s.SymbolInformation]
   ): List[Parameter] =
     (scope.symlinks.flatMap(infos.get) ++ scope.hardlinks).toList.map { info =>
+      val tpe = info.signature match {
+        case s.ValueSignature(tpe) => Some(tpe)
+        case _ => None
+      }
       Parameter(
         name = info.displayName,
         isImplicit = has(info, s.SymbolInformation.Property.IMPLICIT) ||
           has(info, s.SymbolInformation.Property.GIVEN),
-        isRepeated = info.signature match {
-          case s.ValueSignature(_: s.RepeatedType) => true
-          case _ => false
-        }
+        isRepeated = tpe.exists(_.isInstanceOf[s.RepeatedType]),
+        typeSymbol = tpe.flatMap(typeSymbol)
       )
+    }
+
+  private def typeSymbol(tpe: s.Type): Option[String] =
+    tpe match {
+      case s.TypeRef(_, symbol, _) => Some(symbol)
+      case s.ByNameType(inner) => typeSymbol(inner)
+      case s.AnnotatedType(_, inner) => typeSymbol(inner)
+      case _ => None
     }
 
   private def has(info: s.SymbolInformation, property: s.SymbolInformation.Property): Boolean =

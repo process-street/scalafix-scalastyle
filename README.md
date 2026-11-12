@@ -301,16 +301,21 @@ rules = [
 ]
 ```
 
-It names an argument only when it can resolve the call to a Scala method and every overload the call could reach agrees on the name. It leaves alone:
+A wrong name can compile and silently move a value to another parameter, so the rule names an argument only when it is sure. It must resolve the call to a Scala method, every overload the call could reach must agree on the name, and the parameter's declared type must be able to hold the value (`Option` for `None`, a supertype of `List` for `Nil`, or a type parameter). It leaves alone:
 
 - an argument list with a single argument, such as `Future.successful(None)`
 - a list with a repeated parameter, such as `List(None, x)`
 - Java methods
-- `using` and implicit argument lists
-- an extension method called on its receiver (`1.ext(Nil, None)`), whose argument lists do not line up with its parameter lists
+- `using` and implicit argument lists, and any call whose method has one at or before the list being named, since Scala 3 lets a call leave it out
+- an extension method called on its receiver (`1.ext(Nil, None)`), and any call whose written argument lists do not fit the method's parameter lists one for one
+- a parameter whose type it cannot read, a type alias included
 - anything it cannot resolve, such as a call through a function value
 
+For `Foo(...)` on an object, the candidates are every `apply` the object declares or inherits. When a parent is one the rule cannot see into, it names an argument only if the call fits a declared `apply` exactly, using no default arguments, since Scala would otherwise prefer a hidden inherited one that does.
+
 On Scala 3, Scalafix's symbol table cannot read a symbol defined in another file, because Scala 3 classfiles carry TASTy rather than Scala signatures. The rule falls back to its own index of the build's SemanticDB files, which it finds from the classpath and scalac options Scalafix passes it, including sbt's `meta` and `test-meta` directories.
+
+The index covers only the project's own code. A library compiled by Scala 3 ships no SemanticDB, so a call into one (Tapir, Play's Scala 3 build, cats, circe, and since Scala 3.8 the standard library itself) is left alone: the rule neither rewrites it nor catches a new one.
 
 ### NoCloneChecker
 

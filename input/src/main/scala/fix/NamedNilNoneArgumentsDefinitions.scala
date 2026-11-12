@@ -38,7 +38,27 @@ object Syntax {
   }
 }
 
+// Its companion inherits an `apply` with the same arity as the call below,
+// where the synthetic one needs a default. Naming by the synthetic one would
+// move the call onto it and swap the values.
+trait FromPair[A] {
+  def apply(primary: Option[String], fallback: Option[String]): A = build(fallback, primary)
+  protected def build(fallback: Option[String], primary: Option[String]): A
+}
+
+final case class Setting(fallback: Option[String], primary: Option[String], scope: Option[String] = None)
+
+object Setting extends FromPair[Setting] {
+  protected def build(fallback: Option[String], primary: Option[String]): Setting =
+    new Setting(fallback, primary)
+}
+
 object Calls {
+  type Label = Option[Int]
+
+  def seqItems(first: Int, items: Seq[Int]): Int = first
+  def anyValue(first: Int, value: Any): Int = first
+  def aliased(first: Int, label: Label): Int = first
   def keyword(first: Int, `type`: Option[Int]): Int = first
   def twoLists(first: Int)(items: List[Int], label: Option[Int]): Int = first
   def withDefault(first: Int, label: Option[Int], last: Int = 0): Int = first
