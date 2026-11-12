@@ -106,6 +106,12 @@ Notes:
 - `planned` means the rule is still intended for this repo but has not been implemented yet.
 - `IllegalImportsChecker` is currently partial: it supports `illegalImports`, but not upstream `exemptImports`.
 
+Rules beyond scalastyle:
+
+| Rule | Description | Kind |
+| --- | --- | --- |
+| `NamedNilNoneArgumentsChecker` | Names positional `Nil` and `None` arguments after their parameter. | semantic rewrite |
+
 ## Installation
 
 Once published, install the rules in your sbt build with:
@@ -283,6 +289,29 @@ MethodNamesChecker.ignoreRegex = "^$"
 MethodNamesChecker.ignoreOverride = false
 ```
 
+### NamedNilNoneArgumentsChecker
+
+Rewrites a positional `Nil` or `None` argument to a named one, so a call says which parameter it fills: `Config(Nil, None)` becomes `Config(items = Nil, defaultValue = None)`.
+
+It is a semantic rule, so the build needs SemanticDB (`semanticdbEnabled := true`). It is a rewrite rather than a lint: `scalafix --check` fails with the diff, and `scalafix` applies it.
+
+```hocon
+rules = [
+  NamedNilNoneArgumentsChecker
+]
+```
+
+It names an argument only when it can resolve the call to a Scala method and every overload the call could reach agrees on the name. It leaves alone:
+
+- an argument list with a single argument, such as `Future.successful(None)`
+- a list with a repeated parameter, such as `List(None, x)`
+- Java methods
+- `using` and implicit argument lists
+- an extension method called on its receiver (`1.ext(Nil, None)`), whose argument lists do not line up with its parameter lists
+- anything it cannot resolve, such as a call through a function value
+
+On Scala 3, Scalafix's symbol table cannot read a symbol defined in another file, because Scala 3 classfiles carry TASTy rather than Scala signatures. The rule falls back to its own index of the build's SemanticDB files, which it finds from the classpath and scalac options Scalafix passes it, including sbt's `meta` and `test-meta` directories.
+
 ### NoCloneChecker
 
 Flags zero-argument `clone()` methods.
@@ -420,7 +449,7 @@ Important directories:
 
 - `rules/`: custom scalafix rule implementations
 - `tests/`: ScalaTest + scalafix testkit suites
-- `input/` / `output/`: reserved for a more standard scalafix-testkit file-based layout; currently mostly unused
+- `input/` / `output/`: file-based fixtures for semantic rules, run by `SemanticRuleSuite` (`scala-3/` holds Scala 3-only cases)
 - `project/TargetAxis.scala`: helper for the sbt project-matrix test wiring
 
 ## Build And Test Model
@@ -430,7 +459,7 @@ This repo uses `sbt-projectmatrix` plus `sbt-scalafix`.
 Rules:
 
 - are compiled for Scala `2.12` and `2.13`
-- are implemented as syntactic rules so they can run on both Scala 2 and Scala 3 source
+- are implemented as syntactic rules so they can run on both Scala 2 and Scala 3 source, except `NamedNilNoneArgumentsChecker`, which needs SemanticDB
 
 Tests:
 
@@ -495,7 +524,7 @@ Before the first release, you still need to do the external setup:
 
 Release flow:
 
-- pushes to `main` publish unique snapshot versions
+- pushes to `main` and pull requests run the tests only
 - tags like `v0.1.0` publish a normal release
 
 The release workflow lives at [.github/workflows/release.yml](./.github/workflows/release.yml).
@@ -521,7 +550,7 @@ Current convention:
 
 ## Notes On Test Style
 
-The current suites use inline `check(...)` calls instead of the more file-based `input/` / `output/` scalafix-testkit layout.
+The syntactic suites use inline `check(...)` calls instead of the more file-based `input/` / `output/` scalafix-testkit layout.
 
 That is intentional for now:
 
@@ -530,6 +559,8 @@ That is intentional for now:
 - it still exercises the rules through scalafix testkit
 
 A later cleanup can migrate these suites to `input/` / `output/` fixtures if that becomes more useful.
+
+Semantic rules need compiled input, so they use those fixtures: each file under `input/` names its rule in a header comment, and `SemanticRuleSuite` compares the result with the file of the same path under `output/`.
 
 ## Compatibility Philosophy
 
