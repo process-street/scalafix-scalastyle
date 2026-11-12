@@ -20,7 +20,7 @@ import metaconfig.Configured
   *   - a Java-defined method, whose parameter names SemanticDB does not keep
   *   - a `using` or implicit argument list, or any call whose method has one
   *     at or before the list being named, since the call may not write it
-  *   - an extension method called on its receiver, such as `1.ext(Nil, None)`
+  *   - an extension method, in any form of call
   *   - a call whose written argument lists do not fit the method's parameter
   *     lists one for one
   *   - a parameter whose declared type cannot hold the argument
@@ -28,10 +28,10 @@ import metaconfig.Configured
   *     a library compiled by Scala 3, or one whose overloads disagree on the
   *     parameter's name
   */
-final class NamedNilNoneArgumentsChecker(index: SemanticdbIndex)
+final class NamedNilNoneArgumentsChecker(index: SemanticdbIndex, isScala3: Boolean)
     extends SemanticRule("NamedNilNoneArgumentsChecker") {
 
-  def this() = this(SemanticdbIndex.empty)
+  def this() = this(SemanticdbIndex.empty, isScala3 = false)
 
   override def description: String =
     "Rewrites positional Nil and None arguments to named arguments."
@@ -39,14 +39,19 @@ final class NamedNilNoneArgumentsChecker(index: SemanticdbIndex)
   override def isRewrite: Boolean = true
 
   override def withConfiguration(config: Configuration): Configured[Rule] =
-    Configured.ok(new NamedNilNoneArgumentsChecker(SemanticdbIndex.fromConfiguration(config)))
+    Configured.ok(
+      new NamedNilNoneArgumentsChecker(
+        SemanticdbIndex.fromConfiguration(config),
+        isScala3 = config.scalaVersion.startsWith("3")
+      )
+    )
 
   override def fix(implicit doc: SemanticDocument): Patch = {
-    val resolver = new CalleeResolver(index)
+    val resolver = new CalleeResolver(index, isScala3)
     doc.tree.collect {
       case apply: Term.Apply =>
-        val (fun, earlierArgumentCounts) = CalleeResolver.unwind(apply)
-        fixArguments(apply.argClause, resolver.resolveFunction(fun).map(Callee(_, earlierArgumentCounts)))
+        val (call, fun, earlierArgumentCounts) = CalleeResolver.unwind(apply)
+        fixArguments(apply.argClause, resolver.resolveCall(call, fun).map(Callee(_, earlierArgumentCounts)))
       case init: Init =>
         init.argClauses.zipWithIndex.map { case (argClause, parameterListIndex) =>
           val earlierArgumentCounts = init.argClauses.take(parameterListIndex).map(_.values.size).toList
@@ -114,55 +119,30 @@ object EmptyValue {
       )
 }
 
-/** The overloads a call may resolve to, as their parameter lists.
-  *
-  * `requiresExactFit` is set when the call is `Foo(...)` on an object with a
-  * parent the rule cannot see into, which might declare an `apply` the call
-  * binds to instead. Scala prefers an overload that needs no default
-  * arguments, and among equally good ones the one the object declares, so
-  * the call can only bind to such a hidden `apply` if every declared one
-  * either needs a default or does not accept the arguments. An exact fit
-  * rules out the first. In the second, naming an argument at its own
-  * position changes nothing for the declared ones, so the call either keeps
-  * binding as before or stops compiling.
+/** The overloads a call may resolve to, as their parameter lists, and how many
+  * arguments each written list before the one being named holds. The list
+  * being named fills parameter list `earlierArgumentCounts.size`.
   */
-final case class Candidates(overloads: List[List[List[Parameter]]], requiresExactFit: Boolean)
-
-/** The candidates for a call, and how many arguments each written list
-  * before the one being named holds. The list being named fills parameter
-  * list `earlierArgumentCounts.size`.
-  */
-final case class Callee(candidates: Candidates, earlierArgumentCounts: List[Int]) {
+final case class Callee(overloads: List[List[List[Parameter]]], earlierArgumentCounts: List[Int]) {
   private val parameterListIndex = earlierArgumentCounts.size
 
   /** The name to give the argument at `argumentIndex`, when every overload
     * the call could reach agrees on it.
     */
   def parameterName(argumentIndex: Int, argumentCount: Int, value: EmptyValue): Option[String] = {
-    val reachable = candidates.overloads.filter(isReachable(_, argumentCount))
-    val fits = !candidates.requiresExactFit || reachable.forall(fitsExactly(_, argumentCount))
-    val names = if (fits) reachable.map(nameIn(_, argumentIndex, value)) else Nil
+    val names = overloads.filter(isReachable(_, argumentCount)).map(nameIn(_, argumentIndex, value))
     names.distinct match {
       case List(Some(name)) => Some(Term.Name(name).syntax)
       case _ => None
     }
   }
 
-  private def writtenCounts(argumentCount: Int): List[(Int, Int)] =
-    (earlierArgumentCounts :+ argumentCount).zipWithIndex
-
   /** Whether the call could be to this overload: no written list has more
     * arguments than the parameter list at its index takes.
     */
   private def isReachable(parameterLists: List[List[Parameter]], argumentCount: Int): Boolean =
-    writtenCounts(argumentCount).forall { case (count, index) =>
+    (earlierArgumentCounts :+ argumentCount).zipWithIndex.forall { case (count, index) =>
       parameterLists.lift(index).forall(parameters => parameters.size >= count || parameters.exists(_.isRepeated))
-    }
-
-  /** Whether every written list fills its parameter list with no defaults. */
-  private def fitsExactly(parameterLists: List[List[Parameter]], argumentCount: Int): Boolean =
-    writtenCounts(argumentCount).forall { case (count, index) =>
-      parameterLists.lift(index).exists(parameters => parameters.size == count && !parameters.exists(_.isRepeated))
     }
 
   private def nameIn(parameterLists: List[List[Parameter]], argumentIndex: Int, value: EmptyValue): Option[String] = {
@@ -199,14 +179,12 @@ object CalleeResolver {
     "scala/Product#",
     "scala/Equals#",
     "scala/Serializable#",
-    "java/io/Serializable#",
-    "scala/deriving/Mirror#",
-    "scala/deriving/Mirror.Product#",
-    "scala/deriving/Mirror.Singleton#",
-    "scala/deriving/Mirror.Sum#"
+    "java/io/Serializable#"
   )
 
   private val function = "scala/(runtime/Abstract)?Function[0-9]+#".r
+
+  private val functionApply = "scala/Function[0-9]+#apply\\(\\)\\.".r
 
   def isWithoutApply(parent: Symbol): Boolean =
     parentsWithoutApply.contains(parent.value) || function.pattern.matcher(parent.value).matches
@@ -235,128 +213,148 @@ object CalleeResolver {
   def canHold(parameter: Parameter, value: EmptyValue): Boolean =
     parameter.typeSymbol.exists(symbol => symbol.endsWith("]") || value.acceptedTypes.contains(symbol))
 
-  /** The function a call applies, and how many arguments each argument list
-    * written before the outermost one holds: `f(a)(b, None)` is `f` with one
-    * earlier list of one argument.
+  /** The innermost application of a call, the function it applies, and how
+    * many arguments each argument list written before the outermost one
+    * holds: `f(a)(b, None)` is `f(a)`, `f`, and one earlier list of one
+    * argument.
     */
-  def unwind(apply: Term.Apply): (Term, List[Int]) = {
+  def unwind(apply: Term.Apply): (Term.Apply, Term, List[Int]) = {
     @annotation.tailrec
-    def loop(fun: Term, earlier: List[Int]): (Term, List[Int]) =
+    def loop(call: Term.Apply, fun: Term, earlier: List[Int]): (Term.Apply, Term, List[Int]) =
       fun match {
-        case inner: Term.Apply => loop(inner.fun, inner.argClause.values.size :: earlier)
-        case Term.ApplyType(inner, _) => loop(inner, earlier)
-        case other => (other, earlier)
+        case inner: Term.Apply => loop(inner, inner.fun, inner.argClause.values.size :: earlier)
+        case Term.ApplyType(inner, _) => loop(call, inner, earlier)
+        case other => (call, other, earlier)
       }
-    loop(apply.fun, Nil)
+    loop(apply, apply.fun, Nil)
+  }
+
+  /** The method a Scala 3 synthetic says the call applies, when it is a plain
+    * reference to one. A synthetic that goes through anything else, such as
+    * an implicit conversion, gives none, and so does a function value's
+    * `apply`, whose `v1`, `v2` names say nothing.
+    */
+  def chosenMethod(synthetic: SemanticTree): Option[Symbol] = {
+    def isPlain(qualifier: SemanticTree): Boolean =
+      qualifier match {
+        case _: OriginalTree | _: IdTree => true
+        case SelectTree(inner, _) => isPlain(inner)
+        case TypeApplyTree(inner, _) => isPlain(inner)
+        case _ => false
+      }
+    def method(function: SemanticTree): Option[Symbol] =
+      function match {
+        case id: IdTree => Some(id.symbol)
+        case TypeApplyTree(inner, _) => method(inner)
+        case SelectTree(qualifier, id) if isPlain(qualifier) => Some(id.symbol)
+        case _ => None
+      }
+    synthetic match {
+      // An implicit argument list applied after the call wraps it.
+      case ApplyTree(call: ApplyTree, _) => chosenMethod(call)
+      case ApplyTree(function, _) =>
+        method(function).filterNot(symbol => functionApply.pattern.matcher(symbol.value).matches)
+      case _ => None
+    }
   }
 }
 
 /** Finds the overloads a call may go to: first through Scalafix's own symbol
   * table, then through the project's SemanticDB index.
   */
-final class CalleeResolver(index: SemanticdbIndex)(implicit doc: SemanticDocument) {
+final class CalleeResolver(index: SemanticdbIndex, isScala3: Boolean)(implicit doc: SemanticDocument) {
 
-  def resolveFunction(fun: Term): Option[Candidates] =
-    fun match {
-      case name: Term.Name => resolveName(name.symbol)
-      case Term.Select(qualifier, name) if !isExtensionCall(qualifier, name.symbol) => resolveName(name.symbol)
-      case _ => None
+  /** `call` is the innermost application, `fun` the function it applies. */
+  def resolveCall(call: Term.Apply, fun: Term): Option[List[List[List[Parameter]]]] = {
+    val symbol = fun match {
+      case name: Term.Name => name.symbol
+      case Term.Select(_, name) => name.symbol
+      case _ => Symbol.None
     }
-
-  /** A method of an object or package called on some other value is an
-    * extension method: `1.described(Nil, None)`. Its first parameter list
-    * takes the receiver, which the call does not write, so the argument
-    * lists no longer line up with the parameter lists. SemanticDB does not
-    * mark extension methods, so this is the only direct sign of one.
-    *
-    * An extension method defined in a class or trait, or called from a
-    * sibling inside its `extension` block, is not caught here. Its shifted
-    * lists fail the arity and type checks in `Callee` instead.
-    */
-  private def isExtensionCall(qualifier: Term, method: Symbol): Boolean = {
-    val owner = method.owner.value
-    val receiver = qualifier.symbol.value
-    val isOwnerOrItsPackage =
-      qualifier.isInstanceOf[Term.This] || receiver == owner ||
-        (receiver.endsWith("/") && owner.startsWith(receiver))
-    owner.endsWith(".") && !isOwnerOrItsPackage
+    if (symbol.isNone) None
+    else
+      method(symbol) match {
+        case Some(lists) => Some(List(lists))
+        case None if isObject(symbol) || isClass(symbol) => resolveImplicitApply(call, symbol)
+        case None => None
+      }
   }
 
-  /** `new Foo(a, None)` and `extends Foo(a, None)`. */
-  def resolveInit(init: Init): Option[Candidates] = {
+  /** `Foo(a, None)`, which calls `Foo.apply` or, in Scala 3, a constructor.
+    *
+    * Scala 3 records the method it chose as a synthetic over the call, so the
+    * rule names from that one alone. An `apply` can come from places the rule
+    * cannot see, such as a parent in a library or an implicit conversion, and
+    * naming an argument after any other candidate could move the call onto
+    * it. Scala 2 records no synthetics unless asked to, but every parent it
+    * compiles against is readable, so there the rule collects every `apply`
+    * the object declares or inherits.
+    */
+  private def resolveImplicitApply(call: Term.Apply, symbol: Symbol): Option[List[List[List[Parameter]]]] =
+    if (isScala3) {
+      // A conversion applied to the call's result shares its range, such as
+      // a test matcher's, but takes a single argument, so only the method
+      // that can take the call's own arguments is the one it applies.
+      val argumentCount = call.argClause.values.size
+      val chosen = call.synthetics.flatMap(CalleeResolver.chosenMethod).distinct.flatMap(method).filter {
+        _.headOption.exists(parameters => parameters.size >= argumentCount || parameters.exists(_.isRepeated))
+      }
+      chosen match {
+        case List(lists) => Some(List(lists))
+        // A constructor proxy records no synthetic. The constructors a class
+        // declares are all of them.
+        case Nil if isClass(symbol) => Some(constructors(symbol)).filter(_.nonEmpty)
+        // No record, as for `Foo[A](...)` with explicit type arguments, or
+        // more than one: the rule cannot tell which `apply` the call uses.
+        case _ => None
+      }
+    } else if (isObject(symbol)) reachableApplies(symbol).filter(_.nonEmpty)
+    else None
+
+  /** `new Foo(a, None)` and `extends Foo(a, None)`: the constructors a class
+    * declares are all of them, so the overloads are known.
+    */
+  def resolveInit(init: Init): Option[List[List[List[Parameter]]]] = {
     val symbol = init.tpe match {
       case Type.Apply(inner, _) => inner.symbol
       case other => other.symbol
     }
     if (symbol.isNone) None
-    else if (isClass(symbol)) exact(constructors(symbol))
-    else method(symbol).flatMap(lists => exact(List(lists)))
+    else if (isClass(symbol)) Some(constructors(symbol)).filter(_.nonEmpty)
+    else method(symbol).map(List(_))
   }
 
-  private def resolveName(symbol: Symbol): Option[Candidates] =
-    if (symbol.isNone) None
-    else
-      method(symbol) match {
-        case Some(lists) => exact(List(lists))
-        case None if isObject(symbol) => reachableApplies(symbol)
-        // Scala 3 lets `Foo(a, None)` call a constructor without `new`.
-        case None if isClass(symbol) => exact(constructors(symbol))
-        case None => None
-      }
-
-  /** Candidates that are every overload the call could reach. */
-  private def exact(overloads: List[List[List[Parameter]]]): Option[Candidates] =
-    if (overloads.isEmpty) None else Some(Candidates(overloads, requiresExactFit = false))
-
-  /** Every `apply` that `Foo(...)` could reach on the object `Foo`: the ones it
-    * declares, the case class's synthetic one included, and the ones it
-    * inherits from parents the rule can see into. A parent it cannot see into
-    * may hide one more, which `Candidates.requiresExactFit` guards against.
+  /** Every `apply` that `Foo(...)` could reach on the object `Foo` in Scala 2:
+    * the ones it declares, the case class's synthetic one included, and the
+    * ones it inherits. `None` when a parent is one the rule cannot read.
     */
-  private def reachableApplies(obj: Symbol): Option[Candidates] = {
+  private def reachableApplies(obj: Symbol): Option[List[List[List[Parameter]]]] = {
     @annotation.tailrec
     def loop(
         pending: List[Symbol],
         seen: Set[Symbol],
-        found: List[List[List[Parameter]]],
-        isComplete: Boolean
-    ): Option[Candidates] =
+        found: List[List[List[Parameter]]]
+    ): Option[List[List[List[Parameter]]]] =
       pending match {
-        case Nil =>
-          if (found.isEmpty) None else Some(Candidates(found, requiresExactFit = !isComplete))
+        case Nil => Some(found)
         case owner :: rest if seen.contains(owner) || CalleeResolver.isWithoutApply(owner) =>
-          loop(rest, seen + owner, found, isComplete)
+          loop(rest, seen + owner, found)
         case owner :: rest =>
-          typeMembers(owner) match {
-            case Some((Some(applies), parents)) =>
-              loop(rest ++ parents, seen + owner, found ++ applies, isComplete)
-            case Some((None, parents)) => loop(rest ++ parents, seen + owner, found, isComplete = false)
-            case None => loop(rest, seen + owner, found, isComplete = false)
+          owner.info.map(_.signature) match {
+            case Some(signature: ClassSignature) =>
+              val applies = signature.declarations.filter(info => info.isMethod && info.displayName == "apply")
+              val lists = applies.flatMap(info => method(info.symbol))
+              val parents = signature.parents.map {
+                case TypeRef(_, symbol, _) => symbol
+                case _ => Symbol.None
+              }
+              if (lists.size == applies.size) loop(rest ++ parents, seen + owner, found ++ lists)
+              else None
+            case _ => None
           }
       }
-    loop(List(obj), Set.empty, Nil, isComplete = true)
+    loop(List(obj), Set.empty, Nil)
   }
-
-  /** A type's own `apply` methods (`None` when one of them is not a Scala
-    * method the rule can read) and its parents, or `None` when the rule has
-    * no information about the type at all.
-    */
-  private def typeMembers(owner: Symbol): Option[(Option[List[List[List[Parameter]]]], List[Symbol])] =
-    owner.info.map(_.signature) match {
-      case Some(signature: ClassSignature) =>
-        val applies = signature.declarations.filter(info => info.isMethod && info.displayName == "apply")
-        val lists = applies.flatMap(info => method(info.symbol))
-        val parents = signature.parents.map {
-          case TypeRef(_, symbol, _) => symbol
-          case _ => Symbol.None
-        }
-        Some((if (lists.size == applies.size) Some(lists) else None, parents))
-      case Some(_) => None
-      case None =>
-        index.parents(owner.value).map { parents =>
-          (Some(index.applies(owner.value)), parents.map(Symbol(_)))
-        }
-    }
 
   private def isObject(symbol: Symbol): Boolean =
     symbol.isGlobal && symbol.value.endsWith(".") && !symbol.value.endsWith(").")
@@ -364,18 +362,24 @@ final class CalleeResolver(index: SemanticdbIndex)(implicit doc: SemanticDocumen
   private def isClass(symbol: Symbol): Boolean =
     symbol.isGlobal && symbol.value.endsWith("#")
 
-  /** The parameter lists of a Scala method, or `None` for anything else. */
+  /** The parameter lists of a Scala method, or `None` for anything else,
+    * extension methods included: a call to one may or may not write the
+    * receiver, so its argument lists cannot be lined up with its parameter
+    * lists.
+    */
   private def method(symbol: Symbol): Option[List[List[Parameter]]] =
-    symbol.info match {
-      case Some(info) if info.isJava => None
-      case Some(info) =>
-        info.signature match {
-          case signature: MethodSignature if info.isMethod || info.isConstructor =>
-            Some(signature.parameterLists.map(_.map(parameter)))
-          case _ => None
-        }
-      case None => index.method(symbol.value)
-    }
+    if (index.isExtension(symbol.value)) None
+    else
+      symbol.info match {
+        case Some(info) if info.isJava => None
+        case Some(info) =>
+          info.signature match {
+            case signature: MethodSignature if info.isMethod || info.isConstructor =>
+              Some(signature.parameterLists.map(_.map(parameter)))
+            case _ => None
+          }
+        case None => index.method(symbol.value)
+      }
 
   private def parameter(info: SymbolInformation): Parameter = {
     val tpe = info.signature match {

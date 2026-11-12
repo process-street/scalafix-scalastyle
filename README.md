@@ -307,11 +307,12 @@ A wrong name can compile and silently move a value to another parameter, so the 
 - a list with a repeated parameter, such as `List(None, x)`
 - Java methods
 - `using` and implicit argument lists, and any call whose method has one at or before the list being named, since Scala 3 lets a call leave it out
-- an extension method called on its receiver (`1.ext(Nil, None)`), and any call whose written argument lists do not fit the method's parameter lists one for one
+- extension methods, in any form of call
+- any call whose written argument lists do not fit the method's parameter lists one for one
 - a parameter whose type it cannot read, a type alias included
 - anything it cannot resolve, such as a call through a function value
 
-For `Foo(...)` on an object, the candidates are every `apply` the object declares or inherits. When a parent is one the rule cannot see into, it names an argument only if the call fits a declared `apply` exactly, using no default arguments, since Scala would otherwise prefer a hidden inherited one that does.
+`Foo(...)` on an object calls an `apply` that may come from a parent, an implicit conversion or an extension. On Scala 3 the rule names from the method the compiler recorded for the call (its synthetic), and leaves the call alone when there is no such record, as for `Foo[A](...)` with explicit type arguments. Scala 2 records no synthetics by default, so there the rule collects every `apply` the object declares or inherits, and leaves the call alone when they disagree.
 
 On Scala 3, Scalafix's symbol table cannot read a symbol defined in another file, because Scala 3 classfiles carry TASTy rather than Scala signatures. The rule falls back to its own index of the build's SemanticDB files, which it finds from the classpath and scalac options Scalafix passes it, including sbt's `meta` and `test-meta` directories.
 
