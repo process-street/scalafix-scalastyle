@@ -5,6 +5,7 @@ package fix
 
 import scala.collection.immutable
 
+import fix.ClientSyntax._
 import fix.Syntax._
 
 object NamedNilNoneArguments {
@@ -30,7 +31,6 @@ object NamedNilNoneArguments {
   val keyword = Calls.keyword(1, None)
   val generic = new Box[Int](Nil, None)
   val instanceMethod = new Service().find(Nil, None)
-  val implicitClassMethod = "a".tagged(Nil, None)
   val seqParameter = Calls.seqItems(1, Nil)
 
   // Left alone.
@@ -44,6 +44,8 @@ object NamedNilNoneArguments {
   val explicitImplicits = Calls.implicitArgs(1)(Nil, None)
   val notNilOrNone = Config(List("a"), Some("b"))
   val javaMethod = java.util.Objects.equals(None, None)
+  val implicitClassMethod = "a".tagged(Nil, None)
+  val throughView = new Client().send(1, None)
   val parameterOfTypeAny = Calls.anyValue(1, None)
   val parameterOfAliasedType = Calls.aliased(1, None)
   val tuple = (Nil, None)

@@ -20,7 +20,10 @@ import metaconfig.Configured
   *   - a Java-defined method, whose parameter names SemanticDB does not keep
   *   - a `using` or implicit argument list, or any call whose method has one
   *     at or before the list being named, since the call may not write it
-  *   - an extension method, in any form of call
+  *   - an extension method, in any form of call, or a method the index
+  *     cannot place, such as an `export` forwarder
+  *   - a method reached through an implicit class or conversion on the
+  *     receiver
   *   - a call whose written argument lists do not fit the method's parameter
   *     lists one for one
   *   - a parameter whose declared type cannot hold the argument
@@ -266,18 +269,94 @@ final class CalleeResolver(index: SemanticdbIndex, isScala3: Boolean)(implicit d
 
   /** `call` is the innermost application, `fun` the function it applies. */
   def resolveCall(call: Term.Apply, fun: Term): Option[List[List[List[Parameter]]]] = {
-    val symbol = fun match {
-      case name: Term.Name => name.symbol
-      case Term.Select(_, name) => name.symbol
-      case _ => Symbol.None
+    val (receiver, name) = fun match {
+      case name: Term.Name => (None, Some(name))
+      case Term.Select(qualifier, name) => (Some(qualifier), Some(name))
+      case _ => (None, None)
     }
-    if (symbol.isNone) None
-    else
-      method(symbol) match {
-        case Some(lists) => Some(List(lists))
-        case None if isObject(symbol) || isClass(symbol) => resolveImplicitApply(call, symbol)
-        case None => None
+    name.flatMap { name =>
+      val symbol = name.symbol
+      if (symbol.isNone) None
+      else
+        method(symbol) match {
+          case Some(lists) if receiver.forall(isOwnMember(_, symbol)) => Some(List(lists))
+          case Some(_) => None
+          // A view on the object itself, which supplies the `apply`.
+          case None if (isObject(symbol) || isClass(symbol)) && !isConverted(name) =>
+            resolveImplicitApply(call, symbol)
+          case None => None
+        }
+    }
+  }
+
+  /** Whether the method belongs to the receiver itself, rather than coming
+    * from an implicit class or conversion. A call reaches such a method only
+    * when the receiver's own member does not take the arguments, and naming
+    * one can make that member take them, which Scala then prefers.
+    *
+    * Scala 3 records every conversion as a synthetic on the receiver. Scala 2
+    * records none, so there the method must belong to the receiver's static
+    * type or one of its parents, read from the receiver's symbol.
+    */
+  private def isOwnMember(receiver: Term, method: Symbol): Boolean =
+    receiver match {
+      case _: Term.This | _: Term.Super => true
+      case _ if isScala3 => !isConverted(receiver)
+      case _ =>
+        receiverType(receiver).exists { tpe =>
+          if (tpe.value.endsWith("/")) method.owner.value.startsWith(tpe.value)
+          else ancestors(tpe).contains(method.owner)
+        }
+    }
+
+  private def isConverted(term: Term): Boolean =
+    term.synthetics.exists(_.isInstanceOf[ApplyTree])
+
+  /** The static type of a receiver the rule can read without a type checker:
+    * a name, or a `new`. A package stands for itself.
+    */
+  private def receiverType(receiver: Term): Option[Symbol] = {
+    def typeOf(symbol: Symbol): Option[Symbol] =
+      if (symbol.isNone) None
+      else if (symbol.value.endsWith("/")) Some(symbol)
+      else
+        symbol.info.flatMap { info =>
+          if (info.isObject) Some(symbol)
+          else
+            info.signature match {
+              case ValueSignature(TypeRef(_, tpe, _)) => Some(tpe)
+              case MethodSignature(_, Nil, TypeRef(_, tpe, _)) => Some(tpe)
+              case _ => None
+            }
+        }
+    receiver match {
+      case name: Term.Name => typeOf(name.symbol)
+      case Term.Select(_, name) => typeOf(name.symbol)
+      case Term.New(init) =>
+        Some(init.tpe match {
+          case Type.Apply(inner, _) => inner.symbol
+          case other => other.symbol
+        }).filterNot(_.isNone)
+      case _ => None
+    }
+  }
+
+  /** A type and every type it extends, as far as the rule can read them. */
+  private def ancestors(tpe: Symbol): Set[Symbol] = {
+    @annotation.tailrec
+    def loop(pending: List[Symbol], seen: Set[Symbol]): Set[Symbol] =
+      pending match {
+        case Nil => seen
+        case symbol :: rest if seen.contains(symbol) => loop(rest, seen)
+        case symbol :: rest =>
+          val parents = symbol.info.map(_.signature) match {
+            case Some(signature: ClassSignature) =>
+              signature.parents.collect { case TypeRef(_, parent, _) => parent }
+            case _ => Nil
+          }
+          loop(rest ++ parents, seen + symbol)
       }
+    loop(List(tpe), Set.empty)
   }
 
   /** `Foo(a, None)`, which calls `Foo.apply` or, in Scala 3, a constructor.
@@ -362,13 +441,13 @@ final class CalleeResolver(index: SemanticdbIndex, isScala3: Boolean)(implicit d
   private def isClass(symbol: Symbol): Boolean =
     symbol.isGlobal && symbol.value.endsWith("#")
 
-  /** The parameter lists of a Scala method, or `None` for anything else,
-    * extension methods included: a call to one may or may not write the
-    * receiver, so its argument lists cannot be lined up with its parameter
-    * lists.
+  /** The parameter lists of a Scala method, or `None` for anything else.
+    * That includes extension methods, since a call to one may or may not
+    * write the receiver, and methods the index cannot place, such as `export`
+    * forwarders, which may be extension methods too.
     */
   private def method(symbol: Symbol): Option[List[List[Parameter]]] =
-    if (index.isExtension(symbol.value)) None
+    if (index.isUnplaced(symbol.value)) None
     else
       symbol.info match {
         case Some(info) if info.isJava => None

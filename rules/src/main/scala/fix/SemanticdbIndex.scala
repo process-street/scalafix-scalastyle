@@ -45,12 +45,18 @@ final class SemanticdbIndex(roots: => List[Path]) {
   def constructors(cls: String): List[List[List[Parameter]]] =
     index.constructors.getOrElse(cls, Nil).flatMap(method)
 
-  /** Whether the method is a Scala 3 extension method. SemanticDB does not
-    * mark one, but its receiver is the only parameter written before the
-    * method's name, so its first parameter is defined before the method is.
+  /** Whether the method is one whose parameter lists the rule cannot line up
+    * with a call.
+    *
+    * A Scala 3 extension method is one: SemanticDB does not mark it, but its
+    * receiver is the only parameter written before the method's name, so its
+    * first parameter is defined before the method is. A method with no
+    * definition at all is one too, such as an `export` forwarder, which may
+    * forward an extension method. The `apply` and `copy` a case class gets
+    * have no definition either, and are fine.
     */
-  def isExtension(symbol: String): Boolean =
-    index.extensions.contains(symbol)
+  def isUnplaced(symbol: String): Boolean =
+    index.unplaced.contains(symbol)
 }
 
 object SemanticdbIndex {
@@ -59,7 +65,7 @@ object SemanticdbIndex {
   private final case class Entries(
       methods: Map[String, List[List[Parameter]]],
       constructors: Map[String, List[String]],
-      extensions: Set[String]
+      unplaced: Set[String]
   )
 
   /** The SemanticDB roots of the build being fixed.
@@ -101,7 +107,7 @@ object SemanticdbIndex {
   private def load(roots: List[Path]): Entries = {
     val methods = mutable.Map.empty[String, List[List[Parameter]]]
     val constructors = mutable.Map.empty[String, List[String]]
-    val extensions = mutable.Set.empty[String]
+    val unplaced = mutable.Set.empty[String]
 
     def add(document: s.TextDocument): Unit = {
       val infos = document.symbols.iterator.map(info => info.symbol -> info).toMap
@@ -120,12 +126,13 @@ object SemanticdbIndex {
                 constructors(owner) = info.symbol :: constructors.getOrElse(owner, Nil)
               } else {
                 val receiver = signature.parameterLists.headOption.flatMap(_.symlinks.headOption)
-                val isDefinedFirst = for {
-                  parameter <- receiver
-                  parameterAt <- definedAt.get(parameter)
-                  methodAt <- definedAt.get(info.symbol)
-                } yield Ordering[(Int, Int)].lt(parameterAt, methodAt)
-                if (isDefinedFirst.contains(true)) extensions += info.symbol
+                definedAt.get(info.symbol) match {
+                  case Some(methodAt) =>
+                    val isExtension = receiver.flatMap(definedAt.get).exists(Ordering[(Int, Int)].lt(_, methodAt))
+                    if (isExtension) unplaced += info.symbol
+                  case None =>
+                    if (info.displayName != "apply" && info.displayName != "copy") unplaced += info.symbol
+                }
               }
             case _ =>
           }
@@ -145,7 +152,7 @@ object SemanticdbIndex {
       } finally files.close()
     }
 
-    Entries(methods.toMap, constructors.toMap, extensions.toSet)
+    Entries(methods.toMap, constructors.toMap, unplaced.toSet)
   }
 
   private def parameters(

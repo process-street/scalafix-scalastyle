@@ -38,6 +38,18 @@ object Syntax {
   }
 }
 
+// `send(1, None)` does not fit the member, so it goes through the view.
+// Naming `timeout` would make the member fit, and Scala prefers members.
+class Client {
+  def send(id: Int, retries: Int = 3, timeout: Option[Int] = None): String = "member"
+}
+
+object ClientSyntax {
+  implicit class ClientOps(private val client: Client) {
+    def send(id: Int, timeout: Option[Int]): String = "view"
+  }
+}
+
 // Its companion inherits an `apply` with the same arity as the call below,
 // where the synthetic one needs a default. Naming by the synthetic one would
 // move the call onto it and swap the values.

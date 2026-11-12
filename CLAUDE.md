@@ -50,7 +50,7 @@ Current project convention:
 
 Keep tests close to upstream scalastyle tests. Do not refactor them into a different style just for aesthetics.
 
-Semantic rules are the exception: they need compiled input, so they use the file-based fixtures in `input/` and `output/` (Scala 3-only cases under `scala-3/`), run by `SemanticRuleSuite`. Each input file names its rule in a header comment.
+Semantic rules are the exception: they need compiled input, so they use the file-based fixtures in `input/` and `output/` (cases whose result differs by Scala version under `scala-2/` and `scala-3/`), run by `SemanticRuleSuite`. Each input file names its rule in a header comment.
 
 Important scalafix testkit detail:
 

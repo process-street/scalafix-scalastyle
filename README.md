@@ -307,12 +307,13 @@ A wrong name can compile and silently move a value to another parameter, so the 
 - a list with a repeated parameter, such as `List(None, x)`
 - Java methods
 - `using` and implicit argument lists, and any call whose method has one at or before the list being named, since Scala 3 lets a call leave it out
-- extension methods, in any form of call
+- extension methods, in any form of call, and methods the index cannot place, such as `export` forwarders
+- a method reached through an implicit class or conversion on the receiver, since naming an argument can make the receiver's own method take the call instead. On Scala 3 the receiver carries a synthetic for the conversion; on Scala 2 the method must belong to the receiver's static type or a parent, read from a name or a `new`, or the call is left alone
 - any call whose written argument lists do not fit the method's parameter lists one for one
 - a parameter whose type it cannot read, a type alias included
 - anything it cannot resolve, such as a call through a function value
 
-`Foo(...)` on an object calls an `apply` that may come from a parent, an implicit conversion or an extension. On Scala 3 the rule names from the method the compiler recorded for the call (its synthetic), and leaves the call alone when there is no such record, as for `Foo[A](...)` with explicit type arguments. Scala 2 records no synthetics by default, so there the rule collects every `apply` the object declares or inherits, and leaves the call alone when they disagree.
+`Foo(...)` on an object calls an `apply` that may come from a parent, an implicit conversion or an extension. On Scala 3 the rule names from the method the compiler recorded for the call (its synthetic), and leaves the call alone when there is no such record, as for `Foo[A](...)` with explicit type arguments. Scala 2 records no synthetics by default, so there the rule collects every `apply` the object declares or inherits, and leaves the call alone when they disagree. One Scala 2 gap remains: an `apply` that an implicit class adds to `Foo.type` is invisible there, so such a call is named after the companion's own `apply`. That fails to compile rather than moving a value, and `// scalafix:ok` silences it.
 
 On Scala 3, Scalafix's symbol table cannot read a symbol defined in another file, because Scala 3 classfiles carry TASTy rather than Scala signatures. The rule falls back to its own index of the build's SemanticDB files, which it finds from the classpath and scalac options Scalafix passes it, including sbt's `meta` and `test-meta` directories.
 
@@ -455,7 +456,7 @@ Important directories:
 
 - `rules/`: custom scalafix rule implementations
 - `tests/`: ScalaTest + scalafix testkit suites
-- `input/` / `output/`: file-based fixtures for semantic rules, run by `SemanticRuleSuite` (`scala-3/` holds Scala 3-only cases)
+- `input/` / `output/`: file-based fixtures for semantic rules, run by `SemanticRuleSuite` (`scala-2/` and `scala-3/` hold the cases whose result differs by Scala version)
 - `project/TargetAxis.scala`: helper for the sbt project-matrix test wiring
 
 ## Build And Test Model

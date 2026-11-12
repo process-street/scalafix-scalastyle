@@ -41,9 +41,30 @@ trait WindowSyntax {
 
 object WindowSyntax extends WindowSyntax
 
+object ExportedOps {
+  extension (value: Int)
+    def span(size: Int, label: Option[Int] = None)(items: List[Int], tag: Option[Int]): Int = value
+}
+
+object ExportedApi {
+  export ExportedOps.*
+}
+
+// `Viewed(1, None)` reaches an `apply` that an implicit class adds to the
+// companion.
+final case class Viewed(name: String, label: Option[Int])
+
+object ViewedSyntax {
+  implicit class ViewedCompanionOps(private val companion: Viewed.type) {
+    def apply(count: Int, extra: Option[Int] = None, label: Option[Int] = None): String = ""
+  }
+}
+
 object NamedNilNoneArgumentsScala3 {
   import TraitSyntax.*
   import WindowSyntax.*
+  import ExportedApi.*
+  import ViewedSyntax.*
 
   def givens(first: Int)(using items: List[Int], label: Option[Int]): Int = first
   def leadingUsing(using context: String)(first: Int, second: Int)(items: List[Int], label: Option[Int]): Int = first
@@ -74,4 +95,6 @@ object NamedNilNoneArgumentsScala3 {
   val extensionAsMethod = described(1)(Nil, None)
   val extensionWithDefault = 1.window(5)(Nil, None)
   val extensionApplyOnCompanion = Other(1, None)
+  val exportedExtension = 1.span(5)(Nil, None)
+  val viewApplyOnCompanion = Viewed(1, None)
 }
