@@ -106,6 +106,12 @@ Notes:
 - `planned` means the rule is still intended for this repo but has not been implemented yet.
 - `IllegalImportsChecker` is currently partial: it supports `illegalImports`, but not upstream `exemptImports`.
 
+Rules beyond scalastyle:
+
+| Rule | Description | Kind |
+| --- | --- | --- |
+| `NamedNilNoneArgumentsChecker` | Names positional `Nil` and `None` arguments after their parameter. | semantic rewrite |
+
 ## Installation
 
 Once published, install the rules in your sbt build with:
@@ -283,6 +289,36 @@ MethodNamesChecker.ignoreRegex = "^$"
 MethodNamesChecker.ignoreOverride = false
 ```
 
+### NamedNilNoneArgumentsChecker
+
+Rewrites a positional `Nil` or `None` argument to a named one, so a call says which parameter it fills: `Config(Nil, None)` becomes `Config(items = Nil, defaultValue = None)`.
+
+It is a semantic rule, so the build needs SemanticDB (`semanticdbEnabled := true`). It is a rewrite rather than a lint: `scalafix --check` fails with the diff, and `scalafix` applies it.
+
+```hocon
+rules = [
+  NamedNilNoneArgumentsChecker
+]
+```
+
+A wrong name can compile and silently move a value to another parameter, so the rule names an argument only when it is sure. It must resolve the call to a Scala method, every overload the call could reach must agree on the name, and the parameter's declared type must be able to hold the value (`Option` for `None`, a supertype of `List` for `Nil`, or a type parameter). It leaves alone:
+
+- an argument list with a single argument, such as `Future.successful(None)`
+- a list with a repeated parameter, such as `List(None, x)`
+- Java methods
+- `using` and implicit argument lists, and any call whose method has one at or before the list being named, since Scala 3 lets a call leave it out
+- extension methods, in any form of call, and methods the index cannot place, such as `export` forwarders
+- a method reached through an implicit class or conversion on the receiver, since naming an argument can make the receiver's own method take the call instead. On Scala 3 the receiver carries a synthetic for the conversion; on Scala 2 the method must belong to the receiver's static type or a parent, read from a name or a `new`, or the call is left alone
+- any call whose written argument lists do not fit the method's parameter lists one for one
+- a parameter whose type it cannot read, a type alias included
+- anything it cannot resolve, such as a call through a function value
+
+`Foo(...)` on an object calls an `apply` that may come from a parent, an implicit conversion or an extension. On Scala 3 the rule names from the method the compiler recorded for the call (its synthetic), and leaves the call alone when there is no such record, as for `Foo[A](...)` with explicit type arguments. Scala 2 records no synthetics by default, so there the rule collects every `apply` the object declares or inherits, and leaves the call alone when they disagree. One Scala 2 gap remains: an `apply` that an implicit class adds to `Foo.type` is invisible there, so such a call is named after the companion's own `apply`. That fails to compile rather than moving a value, and `// scalafix:ok` silences it.
+
+On Scala 3, Scalafix's symbol table cannot read a symbol defined in another file, because Scala 3 classfiles carry TASTy rather than Scala signatures. The rule falls back to its own index of the build's SemanticDB files, which it finds from the classpath and scalac options Scalafix passes it, including sbt's `meta` and `test-meta` directories.
+
+The index covers only the project's own code. A library compiled by Scala 3 ships no SemanticDB, so a call into one (Tapir, Play's Scala 3 build, cats, circe, and since Scala 3.8 the standard library itself) is left alone: the rule neither rewrites it nor catches a new one.
+
 ### NoCloneChecker
 
 Flags zero-argument `clone()` methods.
@@ -420,7 +456,7 @@ Important directories:
 
 - `rules/`: custom scalafix rule implementations
 - `tests/`: ScalaTest + scalafix testkit suites
-- `input/` / `output/`: reserved for a more standard scalafix-testkit file-based layout; currently mostly unused
+- `input/` / `output/`: file-based fixtures for semantic rules, run by `SemanticRuleSuite` (`scala-2/` and `scala-3/` hold the cases whose result differs by Scala version)
 - `project/TargetAxis.scala`: helper for the sbt project-matrix test wiring
 
 ## Build And Test Model
@@ -430,7 +466,7 @@ This repo uses `sbt-projectmatrix` plus `sbt-scalafix`.
 Rules:
 
 - are compiled for Scala `2.12` and `2.13`
-- are implemented as syntactic rules so they can run on both Scala 2 and Scala 3 source
+- are implemented as syntactic rules so they can run on both Scala 2 and Scala 3 source, except `NamedNilNoneArgumentsChecker`, which needs SemanticDB
 
 Tests:
 
@@ -495,7 +531,7 @@ Before the first release, you still need to do the external setup:
 
 Release flow:
 
-- pushes to `main` publish unique snapshot versions
+- pushes to `main` and pull requests run the tests only
 - tags like `v0.1.0` publish a normal release
 
 The release workflow lives at [.github/workflows/release.yml](./.github/workflows/release.yml).
@@ -521,7 +557,7 @@ Current convention:
 
 ## Notes On Test Style
 
-The current suites use inline `check(...)` calls instead of the more file-based `input/` / `output/` scalafix-testkit layout.
+The syntactic suites use inline `check(...)` calls instead of the more file-based `input/` / `output/` scalafix-testkit layout.
 
 That is intentional for now:
 
@@ -530,6 +566,8 @@ That is intentional for now:
 - it still exercises the rules through scalafix testkit
 
 A later cleanup can migrate these suites to `input/` / `output/` fixtures if that becomes more useful.
+
+Semantic rules need compiled input, so they use those fixtures: each file under `input/` names its rule in a header comment, and `SemanticRuleSuite` compares the result with the file of the same path under `output/`.
 
 ## Compatibility Philosophy
 

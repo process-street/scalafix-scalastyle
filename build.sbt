@@ -48,9 +48,12 @@ lazy val rules = projectMatrix
   .defaultAxes(VirtualAxis.jvm)
   .jvmPlatform(rulesCrossVersions)
 
+// Semantic rules read the SemanticDB that the input sources compile to.
 lazy val input = projectMatrix
   .settings(
-    publish / skip := true
+    publish / skip := true,
+    semanticdbEnabled := true,
+    semanticdbVersion := scalafixSemanticdb.revision
   )
   .defaultAxes(VirtualAxis.jvm)
   .jvmPlatform(scalaVersions = rulesCrossVersions :+ scala3Version)

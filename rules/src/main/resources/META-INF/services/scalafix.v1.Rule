@@ -19,3 +19,4 @@ fix.CovariantEqualsChecker
 fix.StructuralTypeChecker
 fix.PublicMethodsHaveTypeChecker
 fix.MagicNumberChecker
+fix.NamedNilNoneArgumentsChecker

@@ -50,6 +50,8 @@ Current project convention:
 
 Keep tests close to upstream scalastyle tests. Do not refactor them into a different style just for aesthetics.
 
+Semantic rules are the exception: they need compiled input, so they use the file-based fixtures in `input/` and `output/` (cases whose result differs by Scala version under `scala-2/` and `scala-3/`), run by `SemanticRuleSuite`. Each input file names its rule in a header comment.
+
 Important scalafix testkit detail:
 
 - Lint markers must match the exact token position produced by scalafix.
@@ -59,7 +61,11 @@ Important scalafix testkit detail:
 
 ## Implementation Conventions
 
-Default to `SyntacticRule`.
+Default to `SyntacticRule`. Use a `SemanticRule` only when the check needs to know what a name refers to, as `NamedNilNoneArgumentsChecker` does.
+
+On Scala 3, `symbol.info` is empty for anything defined in another file: Scalafix reads symbols from classfiles, and Scala 3 classfiles carry TASTy instead of Scala signatures. Fall back to `SemanticdbIndex`, which reads the build's SemanticDB files, and test a cross-file case on the Scala 3 target. Scala 2's SemanticDB also misplaces some qualified names (`scala.Nil` on 2.12), so match on the qualifier too.
+
+When Scala 3 inserts a method, such as `apply` in `Foo(...)`, the name's symbol is `Foo` and the method it chose is a synthetic on the call (`term.synthetics`). Use that record rather than reasoning about which candidate the compiler would pick: review found two ways the reasoning went wrong. Scala 2 records no synthetics unless `-P:semanticdb:synthetics:on` is passed.
 
 - Use metaconfig config case classes for rules with parameters.
 - Configuration lives in `.scalafix.conf`, not scalastyle XML.
