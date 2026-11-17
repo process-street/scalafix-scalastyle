@@ -111,6 +111,7 @@ Rules beyond scalastyle:
 | Rule | Description | Kind |
 | --- | --- | --- |
 | `NamedNilNoneArgumentsChecker` | Names positional `Nil` and `None` arguments after their parameter. | semantic rewrite |
+| `ParameterShadowingChecker` | Flags a local `val`, `var` or `def` that shadows a parameter of its method. | syntactic lint |
 
 ## Installation
 
@@ -398,6 +399,25 @@ rules = [
 
 ParameterNumberChecker.maxParameters = 8
 ```
+
+### ParameterShadowingChecker
+
+Flags a local `val`, `var` or `def`, at any depth inside a method's body, whose name matches a parameter of that method or of an enclosing one. From that line on the name means the local, so the parameter is silently ignored. Every parameter list counts, `implicit` and `using` ones included, as does an extension method's receiver. Names bound by a `val` pattern, such as `val (a, b) = ...`, and by a `name = expr` line in a `for` count too.
+
+The compiler's own shadowing lints (`-Wshadow` in Scala 3, `-Xlint:private-shadow,type-parameter-shadow` in Scala 2) cover private fields and type parameters only, not a local that shadows a parameter.
+
+```hocon
+rules = [
+  ParameterShadowingChecker
+]
+```
+
+It leaves alone the places where rebinding a name is common and intended:
+
+- lambda parameters, as in `tasks.map { task => ... }` inside a method that takes `task`
+- `case` binders and `for` generators (`task <- tasks`)
+- parameters of a nested method
+- members of a class, trait, object or anonymous class defined inside the method, which start a new scope
 
 ### PublicMethodsHaveTypeChecker
 
