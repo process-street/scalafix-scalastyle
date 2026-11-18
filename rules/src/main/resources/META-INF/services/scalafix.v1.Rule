@@ -20,3 +20,4 @@ fix.StructuralTypeChecker
 fix.PublicMethodsHaveTypeChecker
 fix.MagicNumberChecker
 fix.NamedNilNoneArgumentsChecker
+fix.ParameterShadowingChecker
