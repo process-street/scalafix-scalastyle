@@ -110,6 +110,7 @@ Rules beyond scalastyle:
 
 | Rule | Description | Kind |
 | --- | --- | --- |
+| `DiscardedValueChecker` | Flags a discarded value of a configured type, or a `Future` of one. | semantic lint |
 | `NamedNilNoneArgumentsChecker` | Names positional `Nil` and `None` arguments after their parameter. | semantic rewrite |
 | `ParameterShadowingChecker` | Flags a local `val`, `var` or `def` that shadows a parameter of its method. | syntactic lint |
 
@@ -170,6 +171,35 @@ rules = [
 CyclomaticComplexityChecker.maximum = 13
 CyclomaticComplexityChecker.countCases = true
 ```
+
+### DiscardedValueChecker
+
+Flags a value of a configured type, or a `Future` of one, that the code throws away. Some results must be read: a permission check that answers `Unauthorized` rather than failing lets every caller through when its answer is dropped.
+
+```hocon
+rules = [
+  DiscardedValueChecker
+]
+
+DiscardedValueChecker.types = ["com.example.Permission.Result"]
+DiscardedValueChecker.hint = "Authorize on it."
+```
+
+`types` names each type by its fully qualified name. With none, the rule does nothing. `hint`, if given, ends every message.
+
+A value is thrown away when it is:
+
+- bound to `_` in a `for`, by `_ <- check` or `_ = check`
+- bound to a name in a `for`, or to a local `val`, that nothing in the file reads
+- the right-hand side of `val _ = check`
+- a statement in a block or a class body, other than a block's last
+- the receiver of `map`, `flatMap` or `foreach` given a function that ignores its parameter, such as `check.flatMap(_ => next)`
+
+The compiler's own warnings (`-Wnonunit-statement`, `-Wvalue-discard` and `-Wunused` in Scala 3) cover some of these for every type, but accept a discard written out, such as `_ <- check` or `val _ = check`. This rule refuses those too, for the types it is given.
+
+It reads the type a method or value is declared to return, written or inferred, and flags the listed type itself, not its subtypes, since a subtype is often the success a check has already proved. It leaves alone an expression it cannot type, such as an `if`, a `match` or a call through a function value, and a generic method whose type argument happens to be a listed type.
+
+It is a semantic rule, so the build needs SemanticDB. On Scala 3 it reads types defined in other files from the same SemanticDB index as `NamedNilNoneArgumentsChecker`, so it cannot see the types of methods in a library compiled by Scala 3.
 
 ### EmptyInterpolatedStringChecker
 
@@ -486,7 +516,7 @@ This repo uses `sbt-projectmatrix` plus `sbt-scalafix`.
 Rules:
 
 - are compiled for Scala `2.12` and `2.13`
-- are implemented as syntactic rules so they can run on both Scala 2 and Scala 3 source, except `NamedNilNoneArgumentsChecker`, which needs SemanticDB
+- are implemented as syntactic rules so they can run on both Scala 2 and Scala 3 source, except `DiscardedValueChecker` and `NamedNilNoneArgumentsChecker`, which need SemanticDB
 
 Tests:
 

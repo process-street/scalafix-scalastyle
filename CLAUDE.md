@@ -65,6 +65,8 @@ Default to `SyntacticRule`. Use a `SemanticRule` only when the check needs to kn
 
 On Scala 3, `symbol.info` is empty for anything defined in another file: Scalafix reads symbols from classfiles, and Scala 3 classfiles carry TASTy instead of Scala signatures. Fall back to `SemanticdbIndex`, which reads the build's SemanticDB files, and test a cross-file case on the Scala 3 target. Scala 2's SemanticDB also misplaces some qualified names (`scala.Nil` on 2.12), so match on the qualifier too.
 
+Scala 3 records a method without parameter lists, such as `def pending: Future[A]`, as a `ValueSignature` of a `ByNameType`, not as a `MethodSignature`. Unwrap the by-name type when reading what a reference returns.
+
 When Scala 3 inserts a method, such as `apply` in `Foo(...)`, the name's symbol is `Foo` and the method it chose is a synthetic on the call (`term.synthetics`). Use that record rather than reasoning about which candidate the compiler would pick: review found two ways the reasoning went wrong. Scala 2 records no synthetics unless `-P:semanticdb:synthetics:on` is passed.
 
 - Use metaconfig config case classes for rules with parameters.
