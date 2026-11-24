@@ -23,9 +23,22 @@ final case class Parameter(
     typeSymbol: Option[String]
 )
 
+/** A type as the rules need it: the symbol it refers to and its type
+  * arguments. Only plain references have one: `Future[Result]` is
+  * `scala/concurrent/Future#` applied to `Result`'s symbol.
+  */
+final case class TypeShape(symbol: String, arguments: List[TypeShape])
+
+/** What a reference to a method or value gives: the type it returns, and how
+  * many parameter lists a call has to write to get it, counting neither
+  * `implicit` nor `using` lists.
+  */
+final case class ResultType(shape: TypeShape, explicitParameterLists: Int)
+
 /** Parameter lists of the methods and constructors defined in the project
-  * being fixed, and which of those methods are extension methods, read from
-  * the SemanticDB files its compiler wrote.
+  * being fixed, which of those methods are extension methods, and the type
+  * each method or value returns, read from the SemanticDB files its compiler
+  * wrote.
   *
   * Scalafix looks a symbol up in the classfiles on the classpath. That works
   * for Scala 2, whose classfiles carry Scala signatures, but a Scala 3
@@ -44,6 +57,10 @@ final class SemanticdbIndex(roots: => List[Path]) {
 
   def constructors(cls: String): List[List[List[Parameter]]] =
     index.constructors.getOrElse(cls, Nil).flatMap(method)
+
+  /** The type a method or value returns, when it is a plain reference. */
+  def resultType(symbol: String): Option[ResultType] =
+    index.results.get(symbol)
 
   /** Whether the method is one whose parameter lists the rule cannot line up
     * with a call.
@@ -65,7 +82,8 @@ object SemanticdbIndex {
   private final case class Entries(
       methods: Map[String, List[List[Parameter]]],
       constructors: Map[String, List[String]],
-      unplaced: Set[String]
+      unplaced: Set[String],
+      results: Map[String, ResultType]
   )
 
   /** The SemanticDB roots of the build being fixed.
@@ -108,6 +126,7 @@ object SemanticdbIndex {
     val methods = mutable.Map.empty[String, List[List[Parameter]]]
     val constructors = mutable.Map.empty[String, List[String]]
     val unplaced = mutable.Set.empty[String]
+    val results = mutable.Map.empty[String, ResultType]
 
     def add(document: s.TextDocument): Unit = {
       val infos = document.symbols.iterator.map(info => info.symbol -> info).toMap
@@ -116,6 +135,9 @@ object SemanticdbIndex {
         .flatMap(occurrence => occurrence.range.map(range => occurrence.symbol -> ((range.startLine, range.startCharacter))))
         .toMap
       document.symbols.foreach { info =>
+        if (info.symbol.isGlobal && !info.language.isJava) {
+          resultType(info.signature, infos).foreach(results(info.symbol) = _)
+        }
         val isMethod = info.kind.isMethod || info.kind.isConstructor
         if (isMethod && info.symbol.isGlobal && !info.language.isJava) {
           info.signature match {
@@ -152,8 +174,35 @@ object SemanticdbIndex {
       } finally files.close()
     }
 
-    Entries(methods.toMap, constructors.toMap, unplaced.toSet)
+    Entries(methods.toMap, constructors.toMap, unplaced.toSet, results.toMap)
   }
+
+  private def resultType(
+      signature: s.Signature,
+      infos: Map[String, s.SymbolInformation]
+  ): Option[ResultType] =
+    signature match {
+      case signature: s.MethodSignature =>
+        val explicit = signature.parameterLists.count { scope =>
+          !parameters(scope, infos).headOption.exists(_.isImplicit)
+        }
+        typeShape(signature.returnType).map(ResultType(_, explicit))
+      case s.ValueSignature(tpe) => typeShape(tpe).map(ResultType(_, 0))
+      case _ => None
+    }
+
+  /** Scala 3 records a method without parameter lists as a value of a by-name
+    * type.
+    */
+  private def typeShape(tpe: s.Type): Option[TypeShape] =
+    tpe match {
+      case s.TypeRef(_, symbol, arguments) =>
+        val shapes = arguments.toList.map(typeShape)
+        if (shapes.forall(_.isDefined)) Some(TypeShape(symbol, shapes.flatten)) else None
+      case s.ByNameType(inner) => typeShape(inner)
+      case s.AnnotatedType(_, inner) => typeShape(inner)
+      case _ => None
+    }
 
   private def parameters(
       scope: s.Scope,
